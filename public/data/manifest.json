@@ -1,0 +1,101 @@
+{
+  "assets": [
+    {
+      "id": "AGM-09",
+      "name": "HELLFIRE-IX",
+      "class": "MISSILE-AGM",
+      "rul": 118.17030334472656,
+      "status": "NOMINAL",
+      "data_source": "C-MAPSS"
+    },
+    {
+      "id": "CRZ-04",
+      "name": "TOMA-IV",
+      "class": "MISSILE-CRUISE",
+      "rul": 89.34004211425781,
+      "status": "NOMINAL",
+      "data_source": "C-MAPSS"
+    },
+    {
+      "id": "RP-007",
+      "name": "REAPER-VII",
+      "class": "UAV-STRIKE",
+      "rul": 26.50063705444336,
+      "status": "CRITICAL",
+      "data_source": "C-MAPSS"
+    },
+    {
+      "id": "RP-022",
+      "name": "REAPER-XXII",
+      "class": "UAV-STRIKE",
+      "rul": 121.07093048095703,
+      "status": "NOMINAL",
+      "data_source": "C-MAPSS"
+    },
+    {
+      "id": "RP-031",
+      "name": "REAPER-XXXI",
+      "class": "UAV-STRIKE",
+      "rul": 83.4798355102539,
+      "status": "NOMINAL",
+      "data_source": "C-MAPSS"
+    },
+    {
+      "id": "CRZ-11",
+      "name": "TOMA-XI",
+      "class": "MISSILE-CRUISE",
+      "rul": 10.387275695800781,
+      "status": "CRITICAL",
+      "data_source": "C-MAPSS"
+    },
+    {
+      "id": "AGM-21",
+      "name": "HELLFIRE-XXI",
+      "class": "MISSILE-AGM",
+      "rul": 90.71456146240234,
+      "status": "NOMINAL",
+      "data_source": "C-MAPSS"
+    },
+    {
+      "id": "CRZ-19",
+      "name": "TOMA-XIX",
+      "class": "MISSILE-CRUISE",
+      "rul": 98.96404266357422,
+      "status": "NOMINAL",
+      "data_source": "C-MAPSS"
+    },
+    {
+      "id": "RV-001",
+      "name": "RAVEN-I",
+      "class": "UAV-RECON",
+      "rul": 57.94943618774414,
+      "status": "WARNING",
+      "data_source": "UAV-Synth"
+    },
+    {
+      "id": "RV-014",
+      "name": "RAVEN-XIV",
+      "class": "UAV-RECON",
+      "rul": 63.8432731628418,
+      "status": "WARNING",
+      "data_source": "UAV-Synth"
+    },
+    {
+      "id": "SW-101",
+      "name": "SWARM-\u03b1-101",
+      "class": "UAV-SWARM",
+      "rul": 65.28662109375,
+      "status": "NOMINAL",
+      "data_source": "UAV-Synth"
+    },
+    {
+      "id": "SW-118",
+      "name": "SWARM-\u03b1-118",
+      "class": "UAV-SWARM",
+      "rul": 61.76222229003906,
+      "status": "WARNING",
+      "data_source": "UAV-Synth"
+    }
+  ],
+  "generated_at": "2026-05-04T21:28:21.357146+00:00"
+}
