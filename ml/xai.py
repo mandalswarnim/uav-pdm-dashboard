@@ -2,13 +2,15 @@
 
   - extract_attention(): pulls the last-layer self-attention weights from the
     Transformer for one input batch (B, T, T).
-  - integrated_gradients(): vanilla IG over a baseline of zeros for LSTM/CNN.
-    Returns per-(time, feature) attribution.
+  - integrated_gradients(): Captum Integrated Gradients over a zero baseline,
+    attributing the scalar RUL output. Returns per-(time, feature) attribution.
   - sensor_importance(): collapses an attribution map to per-feature scalar
     importance for the dashboard's bar chart.
 """
 from __future__ import annotations
 import torch
+
+from captum.attr import IntegratedGradients as _CaptumIG
 
 
 @torch.no_grad()
@@ -21,18 +23,22 @@ def extract_attention(model, x: torch.Tensor) -> torch.Tensor:
 
 
 def integrated_gradients(model, x: torch.Tensor, steps: int = 32) -> torch.Tensor:
-    """Vanilla IG attributions w.r.t. RUL output. Returns (B, T, F)."""
+    """Integrated Gradients attributions w.r.t. the RUL output, via Captum.
+
+    The model forward returns ``(rul, fault, extras)``; we attribute the scalar
+    RUL head against a zero baseline and return per-(time, feature) attributions
+    of shape (B, T, F), matching the Sundararajan et al. (2017) formulation.
+    """
     model.eval()
+
+    def _rul_only(inp: torch.Tensor) -> torch.Tensor:
+        rul, _, _ = model(inp)
+        return rul
+
+    ig = _CaptumIG(_rul_only)
     baseline = torch.zeros_like(x)
-    grads_sum = torch.zeros_like(x)
-    for k in range(1, steps + 1):
-        alpha = k / steps
-        xk = (baseline + alpha * (x - baseline)).requires_grad_(True)
-        rul, _, _ = model(xk)
-        grad = torch.autograd.grad(rul.sum(), xk)[0]
-        grads_sum = grads_sum + grad
-    avg = grads_sum / steps
-    return ((x - baseline) * avg).detach()
+    attr = ig.attribute(x, baselines=baseline, n_steps=steps)
+    return attr.detach()
 
 
 def sensor_importance(attribution: torch.Tensor) -> torch.Tensor:

@@ -7,7 +7,7 @@ Endpoints:
                               fault-prob frames pushed to the connected client.
                               Query params:
                                 fault   ∈ {healthy, bearing, esc_thermal, battery}
-                                hours   float, hours-into-life severity (0..200)
+                                hours   float, hours-into-life severity (0..4, EOL=4.0 h)
                                 seed    int, deterministic playback
                                 rate_hz int, frames per second (default 10)
                                 stride  int, predict every Nth tick (default 5)
@@ -61,6 +61,7 @@ def healthz():
         'feature_names': p.feature_names,
         'fault_classes': p.fault_classes,
         'sequence_len': p.seq_len,
+        'scaler_source': p.scaler_source,
     }
 
 
@@ -81,7 +82,7 @@ def predict(req: PredictRequest):
 async def stream(
     ws: WebSocket,
     fault: str = Query('bearing'),
-    hours: float = Query(80.0),
+    hours: float = Query(3.0),
     seed: int = Query(0),
     rate_hz: int = Query(10),
     stride: int = Query(5),

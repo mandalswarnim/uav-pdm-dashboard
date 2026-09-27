@@ -25,7 +25,7 @@ from ml.config import (
 )
 from ml.data.cmapss import load_cmapss_all, rmse, cmapss_score
 from ml.data.uav_synth import load_uav_arrays, UAV_FEATURES, FAULT_NAMES
-from ml.models import ARCHS
+from ml.models import ARCHS, load_checkpoint
 from ml.xai import extract_attention, integrated_gradients, sensor_importance
 
 
@@ -83,11 +83,7 @@ def _load_cmapss_predictions():
         if not ckpt_path.exists():
             print(f'  ⚠ skipping cmapss_{arch} — no checkpoint')
             continue
-        ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
-        Model = ARCHS[arch]
-        model = Model(input_dim=tr.X.shape[-1]).to(device)
-        model.load_state_dict(ckpt['state_dict'])
-        model.eval()
+        model, ckpt = load_checkpoint(ckpt_path, device, input_dim=tr.X.shape[-1])
         X = torch.from_numpy(te.X).to(device)
         preds = _batched_predict(model, X, batch=256)
         out[arch] = {
@@ -123,7 +119,8 @@ def _bake_cmapss_assets(results):
         global_mask[sl] = (units_in_subset == target_unit)
         idx = int(np.where(global_mask)[0][0])
 
-        # Use Transformer attention if available, else IG from CNN/LSTM.
+        # Both XAI surfaces come from the Transformer: attention from the final
+        # encoder layer, and Integrated Gradients sensor attributions.
         per_arch = {}
         attention_2d = None
         ig_per_feature = None
@@ -132,7 +129,7 @@ def _bake_cmapss_assets(results):
             if arch == 'transformer' and attention_2d is None:
                 attn = extract_attention(r['model'], r['X'][idx:idx+1]).cpu().numpy()[0]
                 attention_2d = attn.tolist()  # (T, T)
-            if arch == 'lstm' and ig_per_feature is None:
+            if arch == 'transformer' and ig_per_feature is None:
                 ig = integrated_gradients(r['model'], r['X'][idx:idx+1].clone()).cpu().numpy()[0]
                 # collapse across time for the bar chart
                 ig_per_feature = np.abs(ig).mean(axis=0)
@@ -204,11 +201,6 @@ def _sensor_to_component(sensor: str, asset_class: str) -> str:
 
 def _bake_uav_assets():
     """For each curated UAV, write per-asset JSON using the UAV models."""
-    arrs = load_uav_arrays(seq_len=UAV['sequence_len'])
-    val_index = arrs['val_index']
-    if not val_index:
-        return []
-
     device = get_device()
     # Prefer transformer (gives attention for free); fall back to LSTM / CNN.
     arch_priority = ['transformer', 'lstm', 'cnn']
@@ -217,12 +209,18 @@ def _bake_uav_assets():
         print('  ⚠ no UAV checkpoint; skipping UAV asset export')
         return []
     ckpt_path = CHECKPOINTS / f'uav_{chosen}.pt'
-    Model = ARCHS[chosen]
-    ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
-    model = Model(input_dim=arrs['X_val'].shape[-1],
-                  n_fault_classes=len(UAV['fault_classes'])).to(device)
-    model.load_state_dict(ckpt['state_dict'])
-    model.eval()
+    model, ckpt = load_checkpoint(ckpt_path, device, input_dim=len(UAV_FEATURES),
+                                  n_fault_classes=len(UAV['fault_classes']))
+    meta = ckpt.get('meta', {})
+
+    # Normalise with the exact statistics the model was trained with.
+    scaler = None
+    if 'scaler_mean' in meta and 'scaler_std' in meta:
+        scaler = (np.asarray(meta['scaler_mean']), np.asarray(meta['scaler_std']))
+    arrs = load_uav_arrays(seq_len=UAV['sequence_len'], scaler=scaler, materialize_val=True)
+    val_index = arrs['val_index']
+    if not val_index:
+        return []
 
     X = torch.from_numpy(arrs['X_val']).to(device)
     rul_pred, fault_pred = _batched_predict(model, X, batch=256, with_fault=True)
@@ -295,6 +293,9 @@ def _bake_results_table():
             'score': None if d.get('score') is None else round(d['score'], 1),
             'fault_acc': None if d.get('fault_acc') is None else round(d['fault_acc'], 3),
             'epochs': d['epochs'],
+            'best_epoch': d.get('best_epoch'),
+            'early_stopped': d.get('early_stopped'),
+            'split': d.get('split'),
             'train_size': d['train_size'], 'test_size': d['test_size'],
             'seconds': round(d['seconds'], 1),
             'history': d['history'],

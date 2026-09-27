@@ -29,10 +29,10 @@ export default function MissionPage() {
   useLiveStream(liveSpec);
 
   return (
-    <div className="grid h-full grid-cols-[1fr_360px] gap-3 p-3">
+    <div className="grid grid-cols-[1fr_360px] gap-3 p-3">
       {/* Left: radar + charts */}
-      <section className="grid grid-rows-[1fr_180px] gap-3">
-        <div className="holo-panel relative">
+      <section className="flex flex-col gap-3">
+        <div className="holo-panel relative h-[calc(100vh_-_17rem)] min-h-[340px]">
           <div className="absolute left-3 top-2 z-10 text-[11px] uppercase tracking-[0.3em] text-hud-cyan">
             // TACTICAL RADAR · BAND-X · 360° SWEEP
           </div>
@@ -43,7 +43,7 @@ export default function MissionPage() {
           </div>
           <Radar />
         </div>
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid h-[180px] grid-cols-3 gap-3">
           <LiveChart metric="thermal" color="#ffb000" label="THERMAL °C" threshold={mode === 'LIVE' ? 70 : 80} />
           <LiveChart metric="vibration" color="#ff2a2a" label="VIBRATION G" threshold={1.0} />
           <LiveChart metric="power" color="#00e5ff" label="POWER A" />
@@ -51,7 +51,7 @@ export default function MissionPage() {
       </section>
 
       {/* Right: HUD column */}
-      <aside className="flex flex-col gap-3 overflow-y-auto scrollbar-hud">
+      <aside className="flex flex-col gap-3">
         <div className="holo-panel p-3">
           <div className="text-[10px] uppercase tracking-[0.3em] text-hud-cyan/80">// ACTIVE ASSET</div>
           {sel ? (

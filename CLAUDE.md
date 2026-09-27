@@ -33,6 +33,8 @@ fleet, served into a Next.js "Jarvis" HUD with live WebSocket inference.
 │   ├── config.py             paths, hyperparams, get_device() (MPS-aware)
 │   ├── data/cmapss.py        load + preprocess FD001-FD004
 │   ├── data/uav_synth.py     procedural multirotor generator + loader
+│   ├── data/windows.py       WindowStore / WindowLoader — index-based sliding windows
+│   ├── data/split.py         group_holdout — leak-free val split by unit / drone
 │   ├── models/{lstm,transformer,cnn}.py
 │   ├── train.py              unified driver (CLI: --dataset cmapss|uav --arch ...)
 │   ├── xai.py                attention extraction + Integrated Gradients
@@ -61,7 +63,8 @@ fleet, served into a Next.js "Jarvis" HUD with live WebSocket inference.
 - **Frontend** Next.js 14 app router, React 18, TypeScript, Tailwind, @react-three/fiber + drei, recharts, zustand
 - **ML** PyTorch on Apple Silicon MPS, scikit-learn, pandas, matplotlib, captum
 - **Backend** FastAPI + uvicorn, websockets, pydantic
-- **Python**: 3.13.3 in `.venv/`
+- **Python**: 3.13.3 in `.venv/` (created with `--system-site-packages` to reuse the
+  system torch; `Makefile` uses `.venv/bin/python` automatically when it exists)
 
 ## How to run
 
@@ -120,6 +123,38 @@ window is full), then `end`. Client uses `lib/live.ts` (`LiveStream`) and
 `lib/useLiveStream.ts` (auto-subscribes when `mode === 'LIVE'` && `missionRunning`).
 `store.ts → ingestLiveTick` maps raw UAV channels onto the abstract `TelemetryFrame`
 slots so all existing HUD components work unchanged.
+
+## Training design decisions (keep these when editing `ml/train.py`)
+
+- **Validation holds out whole groups**, never random windows. Sliding windows
+  overlap, so a random split over windows leaks and made val RMSE ~4x lower than
+  test (cmapss/cnn: val 4.6 vs test 18.5). `ml/data/split.py::group_holdout`
+  splits C-MAPSS by unit and UAV by drone (stratified by fault class). Best
+  checkpoint + early stopping (`patience` in `ml/config.py`) key off this val set.
+- **RUL is predicted on a 0..1 scale internally.** Every model has a `rul_scale`
+  buffer (= `rul_clip`) that maps the head output back to raw units, so callers
+  still see cycles / percent. The loss is MSE on the scaled target so it is
+  commensurate with the fault cross-entropy (`fault_loss_w=0.5`). Before this,
+  raw-unit MSE (~10³) drowned the CE term and CNN fault acc was 0.615.
+- **Fault CE is down-weighted early in life** (`fault_ce_life_weight`): a
+  per-drone fault label is constant, but at life_frac≈0 a faulty drone is
+  indistinguishable from healthy, so each sample's CE is weighted by
+  `1 - RUL/clip` (floored at `fault_ce_min_weight`).
+- **Feature scaler lives in the checkpoint** (`meta.scaler_mean/std`, fitted on
+  training drones only). `backend/inference.py` and `ml/export.py` read it from
+  there; only checkpoints from before this change fall back to refitting from
+  `data/uav_synth`, and the backend refuses to start if that data is missing
+  rather than serving unnormalised garbage. Load checkpoints via
+  `ml.models.load_checkpoint`, which back-fills `rul_scale` for old files.
+- Run JSONs / `results.json` rows carry `epochs` (actually run), `max_epochs`,
+  `best_epoch`, `early_stopped`, `split`, and `history[].val_fault_acc`.
+- **UAV windows are indexed, not copied.** `ml/data/windows.py::WindowStore`
+  holds every scaled tick once (~177 MB) on the training device and gathers
+  (B, T, F) batches by end-index; `WindowLoader` replaces `DataLoader` for UAV.
+  `load_uav_arrays` returns `store` + `train_ends` / `val_ends`; only pass
+  `materialize_val=True` (export / XAI) when you actually need `X_val` as an
+  array. Materialising all windows used ~1.5 GB and got the retrain OOM-killed
+  on the 16 GB machine.
 
 ## Key constants & gotchas
 

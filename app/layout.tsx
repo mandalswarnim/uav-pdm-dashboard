@@ -12,10 +12,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body className="min-h-screen">
-        <div className="relative z-10 flex h-screen flex-col">
+        <div className="relative z-10 flex min-h-screen flex-col">
           <AppBootstrap />
           <TopNav />
-          <main className="relative flex-1 overflow-hidden">{children}</main>
+          <main className="relative flex-1">{children}</main>
           <footer className="border-t border-hud-cyan/30 bg-hud-bg/80 px-4 py-1 text-[10px] uppercase tracking-[0.3em] text-hud-dim">
             <div className="flex justify-between">
               <span>// SYS::ONLINE</span>

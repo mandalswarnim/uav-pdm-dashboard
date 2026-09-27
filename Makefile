@@ -1,6 +1,7 @@
-.PHONY: setup fetch synth train export figures all clean backend
+.PHONY: setup fetch synth train train-cmapss train-uav train-UAV export figures all clean backend
 
-PY := python3
+# Use the project venv when present (see RESTORE.md), else system python3.
+PY := $(if $(wildcard .venv/bin/python),.venv/bin/python,python3)
 
 setup:
 	$(PY) -m pip install -r requirements.txt
@@ -16,6 +17,9 @@ train-cmapss:
 
 train-uav:
 	$(PY) -m ml.train --dataset uav --arch lstm transformer cnn
+
+# Case-insensitive alias documented in the dissertation prose.
+train-UAV: train-uav
 
 train: train-cmapss train-uav
 

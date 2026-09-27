@@ -206,12 +206,29 @@ UAV_FEATURES = (
 )
 
 
-def load_uav_arrays(seq_len: int, val_drone_frac: float = 0.2):
-    """Load synthesized fleet, build sliding windows, return train/val arrays.
+def load_uav_arrays(seq_len: int, val_drone_frac: float = 0.2,
+                    scaler: tuple[np.ndarray, np.ndarray] | None = None,
+                    stride: int = 5, materialize_val: bool = True):
+    """Load the synthesized fleet as a ``WindowStore`` plus window indices.
 
-    Returns dict with X (N,T,F), y_rul (N,), y_fault (N,), groups by drone.
+    Ticks are kept once in ``store`` (scaled, float32); a window is addressed by
+    its end tick. Returned dict:
+
+      store            WindowStore over every drone (train + held-out)
+      train_ends       (N_tr,) window end indices into ``store`` (training drones)
+      groups_train     (N_tr,) drone ordinal per training window (for group splits)
+      y_fault_train    (N_tr,) fault class per training window (for stratification)
+      y_rul_train      (N_tr,)
+      val_ends         (N_va,) window ends for the held-out drones
+      y_rul_val / y_fault_val / val_index   as before
+      X_val            (N_va, T, F) — only when ``materialize_val`` (export / XAI)
+      scaler_mean / scaler_std, feature_names, train_drones, val_drones
+
+    ``scaler`` — optional (mean, std) to apply instead of fitting on the
+    training drones; pass the statistics stored in a checkpoint so export /
+    serving normalise exactly as training did.
     """
-    from sklearn.preprocessing import StandardScaler
+    from ml.data.windows import WindowStore
 
     files = sorted(UAV_DIR.glob('UAV-*.parquet'))
     if not files:
@@ -219,8 +236,6 @@ def load_uav_arrays(seq_len: int, val_drone_frac: float = 0.2):
 
     rng = np.random.default_rng(SEED)
     # Stratified hold-out: ensure each fault class appears in both partitions.
-    # We probe each drone's parquet for its fault label, then pick at least one
-    # drone per class for validation.
     drone_class: dict[str, int] = {}
     for f in files:
         df_head = pd.read_parquet(f, columns=['fault_class']).head(1)
@@ -233,48 +248,87 @@ def load_uav_arrays(seq_len: int, val_drone_frac: float = 0.2):
     val_drones: set[str] = set()
     for c, ds in by_class.items():
         rng.shuffle(ds)
-        # 1 of every class, plus a 20%-of-class top-up rounded up
         n_val_c = max(1, int(round(len(ds) * val_drone_frac)))
         val_drones.update(ds[:n_val_c])
 
-    X_tr, y_rul_tr, y_fault_tr = [], [], []
-    X_va, y_rul_va, y_fault_va = [], [], []
-    flight_index_va: list[dict] = []
+    train_drones = sorted(d for d in drone_class if d not in val_drones)
+    drone_ord = {d: i for i, d in enumerate(train_drones)}
 
-    # Fit a global scaler on training drones first
-    train_frames = [pd.read_parquet(f) for f in files if f.stem not in val_drones]
-    scaler = StandardScaler().fit(pd.concat(train_frames, ignore_index=True)[UAV_FEATURES])
+    # Fit the scaler on training drones only (never the held-out set).
+    if scaler is None:
+        acc_n = 0; acc_sum = None; acc_sq = None
+        for f in files:
+            if f.stem in val_drones:
+                continue
+            a = pd.read_parquet(f, columns=UAV_FEATURES).to_numpy(dtype=np.float64)
+            acc_n += len(a)
+            acc_sum = a.sum(0) if acc_sum is None else acc_sum + a.sum(0)
+            acc_sq = (a ** 2).sum(0) if acc_sq is None else acc_sq + (a ** 2).sum(0)
+        mean = acc_sum / acc_n
+        var = acc_sq / acc_n - mean ** 2
+        scaler_mean = mean.astype(np.float32)
+        scaler_std = np.sqrt(np.clip(var, 1e-12, None)).astype(np.float32)   # == StandardScaler.scale_
+    else:
+        scaler_mean = np.asarray(scaler[0], dtype=np.float32)
+        scaler_std = np.asarray(scaler[1], dtype=np.float32)
+
+    data_chunks, rul_chunks, fault_chunks = [], [], []
+    train_ends, group_tr, fault_tr, rul_tr = [], [], [], []
+    val_ends, fault_va, rul_va = [], [], []
+    flight_index_va: list[dict] = []
+    offset = 0
 
     for f in files:
-        df = pd.read_parquet(f)
-        df[UAV_FEATURES] = scaler.transform(df[UAV_FEATURES])
+        df = pd.read_parquet(f, columns=['flight_id', 'rul', 'fault_class'] + UAV_FEATURES)
         is_val = f.stem in val_drones
         for flight_id, g in df.groupby('flight_id', sort=False):
-            arr = g[UAV_FEATURES].to_numpy(dtype=np.float32)
+            arr = (g[UAV_FEATURES].to_numpy(dtype=np.float32) - scaler_mean) / scaler_std
             ruls = g['rul'].to_numpy(dtype=np.float32)
             fault = int(g['fault_class'].iloc[0])
             n = len(arr)
-            if n < seq_len:
-                continue
-            stride = 5  # downsample to keep dataset tractable
-            for end in range(seq_len, n + 1, stride):
-                window = arr[end - seq_len:end]
-                rul = ruls[end - 1]
+            data_chunks.append(arr); rul_chunks.append(ruls)
+            fault_chunks.append(np.full(n, fault, dtype=np.int64))
+            if n >= seq_len:
+                local_ends = np.arange(seq_len, n + 1, stride)
+                ends = local_ends + offset
                 if is_val:
-                    X_va.append(window); y_rul_va.append(rul); y_fault_va.append(fault)
-                    flight_index_va.append({'drone_id': f.stem, 'flight_id': flight_id, 'tick_end': end})
+                    val_ends.append(ends)
+                    fault_va.append(np.full(len(ends), fault, np.int64))
+                    rul_va.append(ruls[local_ends - 1])
+                    flight_index_va.extend(
+                        {'drone_id': f.stem, 'flight_id': flight_id, 'tick_end': int(e)} for e in local_ends)
                 else:
-                    X_tr.append(window); y_rul_tr.append(rul); y_fault_tr.append(fault)
+                    train_ends.append(ends)
+                    group_tr.append(np.full(len(ends), drone_ord[f.stem], np.int64))
+                    fault_tr.append(np.full(len(ends), fault, np.int64))
+                    rul_tr.append(ruls[local_ends - 1])
+            offset += n
 
-    return {
-        'X_train': np.stack(X_tr), 'y_rul_train': np.array(y_rul_tr, dtype=np.float32),
-        'y_fault_train': np.array(y_fault_tr, dtype=np.int64),
-        'X_val': np.stack(X_va), 'y_rul_val': np.array(y_rul_va, dtype=np.float32),
-        'y_fault_val': np.array(y_fault_va, dtype=np.int64),
+    store = WindowStore(np.concatenate(data_chunks), np.concatenate(rul_chunks),
+                        np.concatenate(fault_chunks), seq_len)
+    del data_chunks, rul_chunks, fault_chunks
+
+    def _cat(parts, dtype):
+        return np.concatenate(parts).astype(dtype) if parts else np.zeros(0, dtype)
+
+    out = {
+        'store': store,
+        'train_ends': _cat(train_ends, np.int64),
+        'groups_train': _cat(group_tr, np.int64),
+        'y_fault_train': _cat(fault_tr, np.int64),
+        'y_rul_train': _cat(rul_tr, np.float32),
+        'val_ends': _cat(val_ends, np.int64),
+        'y_rul_val': _cat(rul_va, np.float32),
+        'y_fault_val': _cat(fault_va, np.int64),
         'val_index': flight_index_va,
         'feature_names': UAV_FEATURES,
+        'train_drones': train_drones,
         'val_drones': sorted(val_drones),
+        'scaler_mean': scaler_mean, 'scaler_std': scaler_std,
     }
+    if materialize_val:
+        out['X_val'] = store.gather_numpy(out['val_ends'])
+    return out
 
 
 def main():

@@ -47,8 +47,10 @@ class TransformerRegressor(nn.Module):
 
     def __init__(self, input_dim: int, d_model: int = 96, nhead: int = 4,
                  layers: int = 2, dim_ff: int = 192, dropout: float = 0.2,
-                 n_fault_classes: int | None = None):
+                 n_fault_classes: int | None = None, rul_scale: float = 1.0):
         super().__init__()
+        # Head predicts RUL on a 0..1 scale; buffer maps back to raw units.
+        self.register_buffer('rul_scale', torch.tensor(float(rul_scale)))
         self.proj = nn.Linear(input_dim, d_model)
         self.pe = _PositionalEncoding(d_model)
         self.layers = nn.ModuleList([
@@ -72,6 +74,6 @@ class TransformerRegressor(nn.Module):
             attn_layers.append(attn)
         # Pool: mean across time
         pooled = h.mean(dim=1)
-        rul = self.head_rul(pooled).squeeze(-1)
+        rul = self.head_rul(pooled).squeeze(-1) * self.rul_scale
         fault = self.head_fault(pooled) if self.head_fault is not None else None
         return rul, fault, {'attn': attn_layers[-1], 'hidden': pooled}

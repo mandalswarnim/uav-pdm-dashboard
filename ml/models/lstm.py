@@ -8,8 +8,12 @@ class LSTMRegressor(nn.Module):
     arch_name = 'lstm'
 
     def __init__(self, input_dim: int, hidden: int = 96, layers: int = 2,
-                 dropout: float = 0.25, n_fault_classes: int | None = None):
+                 dropout: float = 0.25, n_fault_classes: int | None = None,
+                 rul_scale: float = 1.0):
         super().__init__()
+        # The head predicts RUL on a 0..1 scale; `rul_scale` (= rul_clip) maps
+        # it back to raw units so callers see RUL in cycles / percent.
+        self.register_buffer('rul_scale', torch.tensor(float(rul_scale)))
         self.lstm = nn.LSTM(
             input_size=input_dim, hidden_size=hidden, num_layers=layers,
             batch_first=True, dropout=dropout if layers > 1 else 0.0,
@@ -26,6 +30,6 @@ class LSTMRegressor(nn.Module):
         # x: (B, T, F)
         out, _ = self.lstm(x)
         h_last = out[:, -1, :]
-        rul = self.head_rul(h_last).squeeze(-1)
+        rul = self.head_rul(h_last).squeeze(-1) * self.rul_scale
         fault = self.head_fault(h_last) if self.head_fault is not None else None
         return rul, fault, {'hidden': h_last}

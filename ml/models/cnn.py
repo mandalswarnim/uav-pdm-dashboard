@@ -13,8 +13,10 @@ class CNNRegressor(nn.Module):
 
     def __init__(self, input_dim: int, channels: int = 64, n_blocks: int = 4,
                  kernel: int = 5, dropout: float = 0.3,
-                 n_fault_classes: int | None = None):
+                 n_fault_classes: int | None = None, rul_scale: float = 1.0):
         super().__init__()
+        # Head predicts RUL on a 0..1 scale; buffer maps back to raw units.
+        self.register_buffer('rul_scale', torch.tensor(float(rul_scale)))
         layers: list[nn.Module] = []
         in_c = input_dim
         for i in range(n_blocks):
@@ -39,6 +41,6 @@ class CNNRegressor(nn.Module):
         h = self.body(x.transpose(1, 2))
         h = h.mean(dim=-1)         # global average pool over time
         h = self.dropout(h)
-        rul = self.head_rul(h).squeeze(-1)
+        rul = self.head_rul(h).squeeze(-1) * self.rul_scale
         fault = self.head_fault(h) if self.head_fault is not None else None
         return rul, fault, {'hidden': h}

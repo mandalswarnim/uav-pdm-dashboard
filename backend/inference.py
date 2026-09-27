@@ -14,7 +14,7 @@ import torch.nn.functional as F
 
 from ml.config import CHECKPOINTS, UAV, get_device
 from ml.data.uav_synth import UAV_FEATURES, FAULT_NAMES
-from ml.models import ARCHS
+from ml.models import load_checkpoint
 
 PRIORITY = ['transformer', 'lstm', 'cnn']
 
@@ -25,35 +25,44 @@ class UAVPredictor:
     def __init__(self):
         self.device = get_device()
         self.lock = threading.Lock()
-        self.arch, self.model = self._load()
+        self.arch, self.model, meta = self._load()
         self.feature_names: list[str] = UAV_FEATURES
         self.fault_classes: list[str] = list(FAULT_NAMES)
-        self.seq_len: int = UAV['sequence_len']
-        # Fit-and-cache normalization stats from the synth fleet so live frames
-        # are scaled the same way as training.
-        self.scaler_mean, self.scaler_std = self._compute_scaler()
+        self.seq_len: int = int(meta.get('sequence_len', UAV['sequence_len']))
+        # Normalisation statistics are stored in the checkpoint at train time
+        # (fitted on training drones only) so serving scales live frames
+        # exactly as training did. Older checkpoints fall back to refitting.
+        if 'scaler_mean' in meta and 'scaler_std' in meta:
+            self.scaler_mean = np.asarray(meta['scaler_mean'], dtype=np.float32)
+            self.scaler_std = np.asarray(meta['scaler_std'], dtype=np.float32).clip(min=1e-6)
+            self.scaler_source = 'checkpoint'
+        else:
+            print('[backend] ⚠ checkpoint has no scaler stats; refitting from data/uav_synth '
+                  '(retrain with `make train-uav` to embed them)')
+            self.scaler_mean, self.scaler_std = self._compute_scaler()
+            self.scaler_source = 'refit'
 
-    def _load(self) -> tuple[str, torch.nn.Module]:
+    def _load(self) -> tuple[str, torch.nn.Module, dict]:
         for arch in PRIORITY:
             p = CHECKPOINTS / f'uav_{arch}.pt'
             if not p.exists():
                 continue
-            ckpt = torch.load(p, map_location=self.device, weights_only=False)
-            Model = ARCHS[arch]
-            model = Model(input_dim=len(UAV_FEATURES), n_fault_classes=len(FAULT_NAMES)).to(self.device)
-            model.load_state_dict(ckpt['state_dict'])
-            model.eval()
+            model, ckpt = load_checkpoint(p, self.device, input_dim=len(UAV_FEATURES),
+                                          n_fault_classes=len(FAULT_NAMES))
             print(f'[backend] loaded uav_{arch}.pt on {self.device}')
-            return arch, model
+            return arch, model, ckpt.get('meta', {})
         raise RuntimeError('No UAV checkpoint found. Run `make train-uav` first.')
 
     def _compute_scaler(self) -> tuple[np.ndarray, np.ndarray]:
-        """Fit a global standard scaler over all training drones to normalize live frames."""
+        """Legacy fallback: refit a global scaler over the synth fleet on disk."""
         from ml.data.uav_synth import UAV_DIR
         import pandas as pd
         files = sorted(UAV_DIR.glob('UAV-*.parquet'))
         if not files:
-            return np.zeros(len(UAV_FEATURES)), np.ones(len(UAV_FEATURES))
+            raise RuntimeError(
+                'Checkpoint lacks scaler stats and data/uav_synth is empty — predictions '
+                'would be unnormalised garbage. Run `make synth && make train-uav`.'
+            )
         frames = [pd.read_parquet(f, columns=UAV_FEATURES) for f in files]
         all_data = np.concatenate([f.to_numpy(dtype=np.float32) for f in frames])
         return all_data.mean(0), all_data.std(0).clip(min=1e-6)

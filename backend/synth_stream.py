@@ -18,7 +18,7 @@ from ml.data.uav_synth import _simulate_flight, UAV_FEATURES
 @dataclass
 class FlightSpec:
     fault_class: int = 1          # 0 healthy, 1 bearing, 2 esc, 3 battery
-    hours_into_life: float = 80.0  # how worn the airframe is going in
+    hours_into_life: float = 3.0  # how worn the airframe is going in (EOL = 4.0 h)
     seed: int = 0
 
 

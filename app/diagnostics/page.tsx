@@ -30,7 +30,7 @@ export default function DiagnosticsPage() {
     : sel;
 
   return (
-    <div className="grid h-full grid-cols-[200px_1fr_360px] gap-3 p-3">
+    <div className="grid grid-cols-[200px_1fr_360px] gap-3 p-3">
       {/* Asset picker */}
       <aside className="holo-panel flex flex-col">
         <div className="border-b border-hud-cyan/30 px-3 py-2 text-[11px] uppercase tracking-[0.3em] text-hud-cyan">
@@ -59,8 +59,8 @@ export default function DiagnosticsPage() {
       </aside>
 
       {/* Center column: 3D wireframe + attention heatmap stacked */}
-      <section className="grid grid-rows-[1fr_240px] gap-3">
-        <div className="holo-panel relative">
+      <section className="flex flex-col gap-3">
+        <div className="holo-panel relative h-[calc(100vh_-_21rem)] min-h-[300px]">
           <div className="absolute left-3 top-2 z-10 text-[11px] uppercase tracking-[0.3em] text-hud-cyan">
             // DIGITAL TWIN · WIREFRAME · XAI OVERLAY
           </div>
@@ -83,7 +83,7 @@ export default function DiagnosticsPage() {
       </section>
 
       {/* Right column: dossier */}
-      <aside className="holo-panel flex flex-col overflow-y-auto p-4 scrollbar-hud">
+      <aside className="holo-panel flex flex-col p-4">
         <div className="text-2xl font-bold uppercase tracking-[0.2em] text-hud-cyan glitch-text">{sel.name}</div>
         <div className="text-[11px] uppercase tracking-[0.25em] text-hud-dim">
           {sel.id} · {sel.class} · <span className="text-hud-cyan">{sel.data_source}</span>

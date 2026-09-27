@@ -14,7 +14,7 @@ from typing import Literal
 import numpy as np
 import pandas as pd
 import torch
-from torch.utils.data import Dataset, DataLoader, random_split
+from torch.utils.data import Dataset, DataLoader, Subset, random_split
 
 from ml.config import CMAPSS, CMAPSS_DIR, SEED
 
@@ -183,17 +183,37 @@ class ArrayDataset(Dataset):
     def __getitem__(self, i): return self.X[i], self.y[i]
 
 
-def make_loaders(Xtr, ytr, Xte, yte, batch_size: int, val_frac: float = 0.1):
+def make_loaders(Xtr, ytr, Xte, yte, batch_size: int, val_frac: float = 0.1,
+                 groups: np.ndarray | None = None, seed: int = SEED):
+    """Build train / val / test loaders.
+
+    When ``groups`` (per-window unit id) is given the validation split holds
+    out whole units, so no window overlaps a training window. Without groups
+    it falls back to the leaky random-over-windows split.
+    Returns (train_loader, val_loader, test_loader, split_info).
+    """
+    from ml.data.split import group_holdout
+
     full = ArrayDataset(Xtr, ytr)
-    n_val = int(len(full) * val_frac)
-    n_train = len(full) - n_val
-    g = torch.Generator().manual_seed(SEED)
-    train_ds, val_ds = random_split(full, [n_train, n_val], generator=g)
+    if groups is not None:
+        tr_idx, va_idx = group_holdout(groups, val_frac, seed)
+        train_ds, val_ds = Subset(full, tr_idx.tolist()), Subset(full, va_idx.tolist())
+        split_info = {
+            'strategy': 'group-by-unit',
+            'train_units': int(len(np.unique(groups[tr_idx]))),
+            'val_units': int(len(np.unique(groups[va_idx]))),
+        }
+    else:
+        n_val = int(len(full) * val_frac)
+        g = torch.Generator().manual_seed(seed)
+        train_ds, val_ds = random_split(full, [len(full) - n_val, n_val], generator=g)
+        split_info = {'strategy': 'random-over-windows'}
     test_ds = ArrayDataset(Xte, yte)
     return (
         DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=0),
         DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=0),
         DataLoader(test_ds, batch_size=batch_size, shuffle=False, num_workers=0),
+        split_info,
     )
 
 

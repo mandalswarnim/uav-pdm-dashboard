@@ -14,7 +14,7 @@ export default function LabPage() {
   }, []);
 
   return (
-    <div className="h-full overflow-y-auto p-3 scrollbar-hud">
+    <div className="p-3">
       <div className="mx-auto max-w-7xl space-y-3">
         <div className="holo-panel px-4 py-3">
           <div className="text-[11px] uppercase tracking-[0.4em] text-hud-cyan/80">SYSTEM // MODEL LAB</div>

@@ -35,11 +35,14 @@ export interface ResultRow {
   rmse: number;
   score: number | null;
   fault_acc: number | null;
-  epochs: number;
+  epochs: number;            // epochs actually run (≤ max_epochs when early-stopped)
+  best_epoch?: number | null;
+  early_stopped?: boolean | null;
+  split?: { strategy: string; [k: string]: unknown } | null;
   train_size: number;
   test_size: number;
   seconds: number;
-  history: { epoch: number; train_loss: number; val_rmse: number; lr: number }[];
+  history: { epoch: number; train_loss: number; val_rmse: number; val_fault_acc?: number | null; lr: number }[];
 }
 
 const BASE = '/data';

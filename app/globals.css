@@ -10,8 +10,7 @@ html, body {
   background: #02060d;
   color: #cfeaff;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  overflow: hidden;
-  height: 100%;
+  overflow-x: hidden;
 }
 
 /* Background grid + radial vignette */
